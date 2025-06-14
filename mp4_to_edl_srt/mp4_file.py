@@ -33,9 +33,9 @@ class ConfigManager:
     
     DEFAULT_CONFIG = {
         "whisper": {
-            "model": "small",
+            "model": "medium",  # "small" から "medium" に変更して精度向上を試みます。 "large-v3" も選択肢です。
             "language": "ja",
-            "initial_prompt": "日本語での自然な会話。",
+            "initial_prompt": "これは日本語の音声文字起こしです。句読点や段落も適切に挿入してください。", # プロンプトをより具体的に変更
             "temperature": 0.0,
             "beam_size": 5,
             "condition_on_previous": True
@@ -659,34 +659,16 @@ class MP4File:
         return self.edl_data, new_record_start
 
     def generate_srt_data(self) -> SRTData:
-        """Generates SRT data based on EDL record timecodes."""
+        """Generates SRT data based on original segment timecodes."""
         print(f"SRTデータを生成中...")
         
         # SRTデータを初期化
         self.srt_data = SRTData()
         
-        # EDLのレコードタイムコードに基づいてSRTセグメントを生成
-        if hasattr(self, 'edl_events_with_timecode') and self.edl_events_with_timecode:
-            print(f"EDLのレコードタイムコードに基づいてSRTデータを生成します")
-            
-            for event in self.edl_events_with_timecode:
-                segment = event["segment"]
-                record_in = event["record_in"]
-                record_out = event["record_out"]
-                
-                # EDLのレコードタイムコードを使用して新しいセグメントを作成
-                srt_segment = Segment(
-                    record_in,
-                    record_out,
-                    segment.transcription
-                )
-                
-                self.srt_data.add_segment(srt_segment)
-        else:
-            # EDLデータがない場合は元のセグメントを使用
-            print(f"警告: EDLデータが見つかりません。元のセグメントを使用します。")
-            for segment in self.segments:
-                self.srt_data.add_segment(segment)
+        # 元のセグメントのタイムコードを使用してSRTデータを生成
+        print(f"元のセグメントのタイムコードに基づいてSRTデータを生成します")
+        for segment in self.segments:
+            self.srt_data.add_segment(segment)
         
         print(f"SRTデータ生成完了: {len(self.srt_data.segments)}セグメント")
         return self.srt_data
