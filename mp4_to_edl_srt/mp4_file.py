@@ -33,18 +33,20 @@ class ConfigManager:
     
     DEFAULT_CONFIG = {
         "whisper": {
-            "model": "medium",  # "small" から "medium" に変更して精度向上を試みます。 "large-v3" も選択肢です。
+            "model": "large-v3",  # 最高精度のlarge-v3モデルを使用
             "language": "ja",
-            "initial_prompt": "これは日本語の音声文字起こしです。句読点や段落も適切に挿入してください。", # プロンプトをより具体的に変更
-            "temperature": 0.0,
+            "initial_prompt": "これは日本語の会話音声です。正確な文字起こしをお願いします。",
+            "temperature": 0.0,  # 決定的な出力のため0に設定
             "beam_size": 5,
-            "condition_on_previous": True
-        },
-        "audio": {
+            "condition_on_previous": True,
+            "word_timestamps": True,
+            "best_of": 5,  # 複数候補から最良を選択
+            "patience": 1.0  # ビーム探索の忍耐度
+        },        "audio": {
             "sample_rate": 44100,
             "channels": 2,
             "format": "wav",
-            "preprocessing": False
+            "preprocessing": True  # 音声前処理を有効化
         },
         "segmentation": {
             "threshold": 0.5,
@@ -234,12 +236,11 @@ class MP4File:
         
         # オフセットを適用
         result_seconds = tc_seconds + offset_seconds
-        
-        # 秒をタイムコードに戻す
+          # 秒をタイムコードに戻す
         return self._seconds_to_timecode(result_seconds)
 
     def extract_audio(self) -> None:
-        """Extracts audio from the MP4 file using FFmpeg."""
+        """Extracts audio from the MP4 file using FFmpeg with enhanced quality."""
         base_name = os.path.splitext(os.path.basename(self.filepath))[0]
         output_dir = os.path.dirname(self.filepath)
         self.audio_filepath = os.path.join(output_dir, f"{base_name}.wav")
@@ -247,9 +248,12 @@ class MP4File:
         command = [
             "ffmpeg",
             "-i", self.filepath,
-            "-vn", "-acodec", "pcm_s16le",
-            "-ar", "44100",
-            "-y",  # Overwrite output file if it exists
+            "-vn",  # 動画ストリームを無視
+            "-acodec", "pcm_s24le",  # 24bitで高品質に
+            "-ar", "48000",  # サンプリングレートを48kHzに向上
+            "-ac", "1",  # モノラルに変換（文字起こしに最適）
+            "-af", "volume=1.5,highpass=f=80,lowpass=f=8000",  # 音量調整とフィルタリング
+            "-y",  # 既存ファイルを上書き
             self.audio_filepath,
         ]
         try:
@@ -282,11 +286,10 @@ class MP4File:
                 audio_file_to_use = self._preprocess_audio(self.audio_filepath)
             else:
                 print("音声前処理をスキップします - 元の音声ファイルを使用")
-            
-            # 初期プロンプトが指定されていない場合はデフォルト値を使用
+              # 初期プロンプトが指定されていない場合はデフォルト値を使用
             if initial_prompt is None:
-                # より控えめな初期プロンプトを使用
-                initial_prompt = ""  # 空のプロンプトに変更
+                # より具体的な初期プロンプトを使用
+                initial_prompt = "これは日本語の会話音声です。正確な文字起こしをお願いします。"
                 
             print(f"文字起こし中: {audio_file_to_use}")
             print(f"使用する初期プロンプト: {initial_prompt}")
@@ -400,11 +403,12 @@ class MP4File:
                 except Exception as e:
                     print(f"モデルロード中のエラー: {str(e)}")
                     return None
-            
-            # モデルサイズの要件（より現実的な見積もり）
+              # モデルサイズの要件（より現実的な見積もり）
             model_memory_requirements = {
-                "medium": 5 * 1024**3,     # 5GB
-                "small": 2 * 1024**3       # 2GB
+                "large-v3": 10 * 1024**3,    # 10GB
+                "large-v2": 10 * 1024**3,    # 10GB  
+                "medium": 5 * 1024**3,       # 5GB
+                "small": 2 * 1024**3         # 2GB
             }
             
             # モデル選択
@@ -430,18 +434,20 @@ class MP4File:
                 if model is None:
                     raise Exception("すべてのモデルのロードに失敗しました")
                 print("smallモデルをCPUにロードしました")
-            
-            # 文字起こしを実行
+              # 文字起こしを実行
             transcribe_options = {
                 "language": "ja",
                 "task": "transcribe",
-                "temperature": 0.2,
+                "temperature": 0.0,  # 決定的な出力
                 "beam_size": 5,
+                "best_of": 5,  # 複数候補から最良を選択
+                "patience": 1.0,
                 "initial_prompt": initial_prompt,
                 "condition_on_previous_text": True,
                 "verbose": True,
                 "fp16": False,  # 精度を優先
-                "suppress_tokens": [-1]  # 特殊トークンを抑制
+                "suppress_tokens": [-1],  # 特殊トークンを抑制
+                "word_timestamps": True  # 単語レベルのタイムスタンプ
             }
             
             # 文字起こしを実行
@@ -474,12 +480,12 @@ class MP4File:
             # ノイズ除去（FFmpegを使用）
             print(f"ノイズ除去フィルターを適用中...")
             normalized_audio.export("temp_normalized.wav", format="wav")
-            
-            # FFmpegのノイズ除去フィルターを適用（周波数帯域を拡大し、ノイズ除去強度を調整）
+              # FFmpegのノイズ除去フィルターを適用（強化版）
             command = [
                 "ffmpeg",
                 "-i", "temp_normalized.wav",
-                "-af", "highpass=f=80,lowpass=f=8000,afftdn=nf=-20",  # 元のフィルター設定
+                "-af", "highpass=f=80,lowpass=f=8000,afftdn=nf=-25,compand=attacks=0.3:decays=1.0:points=-80/-80|-45/-15|-27/-9|-5/-5|20/20",  # 強化されたフィルター
+                "-ar", "48000",  # 高品質サンプリングレート
                 "-y",  # 既存ファイルを上書き
                 processed_path
             ]
