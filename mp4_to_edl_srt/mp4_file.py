@@ -309,15 +309,14 @@ class MP4File:
                     )
                     
                     print("モデル情報: large-v3-turbo (CPU, int8量子化)")
-                    
-                    # faster-whisperのTranscribeオプション
+                      # faster-whisperのTranscribeオプション
                     segments, info = model.transcribe(
                         audio_file_to_use,
                         language="ja",
                         task="transcribe",
-                        initial_prompt=initial_prompt,
+                        initial_prompt="これは日本語の会話音声です。正確な文字起こしをお願いします。",  # 統一されたプロンプト
                         condition_on_previous_text=True,
-                        temperature=0.2,
+                        temperature=0.0,  # より決定的な出力
                         beam_size=5,
                         word_timestamps=True,
                         vad_filter=True,  # 音声区間検出フィルタを有効化
@@ -570,11 +569,11 @@ class MP4File:
         
         # EDLイベントのリストをクリア
         self.edl_data = EDLData(title="My Video Project", fcm="NON-DROP FRAME")
-        
-        # EDLイベントとそのレコードタイムコードを保存するリスト
+          # EDLイベントとそのレコードタイムコードを保存するリスト
         self.edl_events_with_timecode = []
         
         # 内部タイムコードの終了時間を計算（実際の動画長を使用）
+        end_time_seconds = None  # 初期化
         if self.timecode_offset and self.timecode_offset != "00:00:00:00":
             start_time_seconds = self._timecode_to_seconds(self.timecode_offset)
             # 動画の長さが取得できていれば使用、そうでなければデフォルトの1時間を使用
@@ -593,11 +592,12 @@ class MP4File:
                 source_in = self.apply_timecode_offset(segment.start_timecode)
                 source_out = self.apply_timecode_offset(segment.end_timecode)
                 
-                # 内部タイムコードの範囲をチェック
-                source_out_seconds = self._timecode_to_seconds(source_out)
-                if source_out_seconds > end_time_seconds:
-                    print(f"警告: セグメントの終了時間 ({source_out}) が内部タイムコードの範囲を超えています。終了時間を調整します。")
-                    source_out = self._seconds_to_timecode(end_time_seconds)
+                # 内部タイムコードの範囲をチェック（end_time_secondsが設定されている場合のみ）
+                if end_time_seconds is not None:
+                    source_out_seconds = self._timecode_to_seconds(source_out)
+                    if source_out_seconds > end_time_seconds:
+                        print(f"警告: セグメントの終了時間 ({source_out}) が内部タイムコードの範囲を超えています。終了時間を調整します。")
+                        source_out = self._seconds_to_timecode(end_time_seconds)
                     
                 print(f"タイムコードオフセット適用: {segment.start_timecode} → {source_in}")
             else:
